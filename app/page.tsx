@@ -2,7 +2,7 @@
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useState } from "react";
-import { Hex, parseEther, formatEther } from "viem";
+import { Hex, parseEther } from "viem";
 import { REDPACKET_ADDRESS, REDPACKET_ABI } from "./config/contracts";
 import {
   useWriteContract,
@@ -12,6 +12,7 @@ import {
   useWatchContractEvent,
 } from "wagmi";
 import Image from "next/image";
+import { EventModal } from "./components/EventModal";
 
 type TabType = "MON" | "ERC20" | "ERC721";
 
@@ -54,20 +55,12 @@ export default function Home() {
   const { writeContract: writeClaimContract, data: claimHash } =
     useWriteContract();
 
-  const {
-    isLoading: isCreating,
-    isSuccess: isCreateSuccess,
-    isError: isCreateError,
-    error: createError,
-  } = useWaitForTransactionReceipt({ hash });
-  const {
-    isLoading: isClaiming,
-    isSuccess: isClaimSuccess,
-    isError: isClaimError,
-    error: claimError,
-  } = useWaitForTransactionReceipt({
-    hash: claimHash,
-  });
+  const { isLoading: isCreating, isSuccess: isCreateSuccess } =
+    useWaitForTransactionReceipt({ hash });
+  const { isLoading: isClaiming, isSuccess: isClaimSuccess } =
+    useWaitForTransactionReceipt({
+      hash: claimHash,
+    });
 
   // 查询红包信息
   const { data: packetInfo } = useReadContract({
@@ -191,6 +184,23 @@ export default function Home() {
     }
     return uri;
   };
+
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventType, setEventType] = useState<"create" | "claim" | null>(null);
+
+  useEffect(() => {
+    if (createEvent) {
+      setEventType("create");
+      setShowEventModal(true);
+    }
+  }, [createEvent]);
+
+  useEffect(() => {
+    if (claimEvent) {
+      setEventType("claim");
+      setShowEventModal(true);
+    }
+  }, [claimEvent]);
 
   // 如果组件未挂载，返回null或加载占位符
   if (!mounted) {
@@ -535,96 +545,15 @@ export default function Home() {
         )}
       </div>
 
-      {/* Event Information Display */}
-      <div className="space-y-6 mt-8">
-        {createEvent && (
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
-            <h3 className="text-lg font-bold mb-4 text-green-400">
-              🎉 Packet Created
-            </h3>
-            <div className="relative w-full h-48 rounded-lg overflow-hidden mb-4">
-              <Image
-                src={getImageUrl(createEvent.coverURI)}
-                alt="Red Packet Cover"
-                fill
-                className="object-cover"
-              />
-            </div>
-            <div className="space-y-2 text-sm">
-              <p>
-                <span className="text-gray-400">Packet ID:</span>{" "}
-                {createEvent.packetId}
-              </p>
-              <p>
-                <span className="text-gray-400">Creator:</span>{" "}
-                {createEvent.creator}
-              </p>
-              <p>
-                <span className="text-gray-400">Total Amount:</span>{" "}
-                {formatEther(createEvent.totalAmount)} {activeTab}
-              </p>
-              <p>
-                <span className="text-gray-400">Count:</span>{" "}
-                {Number(createEvent.count)}
-              </p>
-              <p>
-                <span className="text-gray-400">Cover URI:</span>{" "}
-                {createEvent.coverURI}
-              </p>
-              {(activeTab === "ERC20" || activeTab === "ERC721") && (
-                <p>
-                  <span className="text-gray-400">Token Address:</span>{" "}
-                  {createEvent.token}
-                </p>
-              )}
-              <p>
-                <span className="text-gray-400">Type:</span>{" "}
-                {["MON", "ERC20", "ERC721"][Number(createEvent.packetType)]}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {isCreateError && (
-          <div className="bg-red-500/20 text-red-400 px-4 py-2 rounded-lg mt-4">
-            ❌ Error: {createError?.message || "Transaction failed"}
-          </div>
-        )}
-
-        {claimEvent && (
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
-            <h3 className="text-lg font-bold mb-4 text-pink-400">
-              🎊 Packet Claimed
-            </h3>
-            <div className="space-y-2 text-sm">
-              <p>
-                <span className="text-gray-400">Packet ID:</span>{" "}
-                {claimEvent.packetId}
-              </p>
-              <p>
-                <span className="text-gray-400">Claimer:</span>{" "}
-                {claimEvent.claimer}
-              </p>
-              <p>
-                <span className="text-gray-400">Amount:</span>{" "}
-                {formatEther(claimEvent.amount)} {activeTab}
-              </p>
-              {activeTab === "ERC721" && (
-                <p>
-                  <span className="text-gray-400">Token ID:</span>{" "}
-                  {Number(claimEvent.tokenId)}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {isClaimError && (
-        <div className="bg-red-500/20 text-red-400 px-4 py-2 rounded-lg mt-4">
-          ❌ Error: {claimError?.message || "Transaction failed"}
-        </div>
-      )}
+      <EventModal
+        showEventModal={showEventModal}
+        setShowEventModal={setShowEventModal}
+        eventType={eventType}
+        createEvent={createEvent}
+        claimEvent={claimEvent}
+        activeTab={activeTab}
+        getImageUrl={getImageUrl}
+      />
     </main>
   );
 }
