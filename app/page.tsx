@@ -212,7 +212,7 @@ export default function Home() {
       <div className="w-full bg-gradient-to-r from-indigo-500/10 to-purple-500/10 backdrop-blur-sm border-b border-gray-800/50">
         <div className="max-w-4xl mx-auto px-6 py-3 flex justify-end space-x-6 text-sm">
           <a
-            href="https://github.com/vectorisvector"
+            href="https://github.com/vectorisvector/red-packet-frontend"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center space-x-2 text-white/90 hover:text-white hover:scale-105 transition-all duration-200 bg-gray-800/40 rounded-full px-4 py-1.5"
