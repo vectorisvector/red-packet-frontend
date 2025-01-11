@@ -259,7 +259,7 @@ export default function Home() {
       <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white">
         <div className="max-w-4xl mx-auto p-6">
           <div className="animate-pulse">
-            <div className="h-8 bg-gray-700 rounded w-48 mb-12"></div>
+            <div className="h-8 bg-gray-700 rounded w-48 mb-8"></div>
             <div className="h-[400px] bg-gray-800/50 rounded-2xl"></div>
           </div>
         </div>
@@ -320,7 +320,7 @@ export default function Home() {
           <Stats />
 
           {/* Header */}
-          <div className="flex justify-between items-center mb-12">
+          <div className="flex justify-between items-center mb-8">
             <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">
               Red Packet DApp
             </h1>

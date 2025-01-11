@@ -31,7 +31,7 @@ export const Stats = () => {
   });
 
   return (
-    <div className="grid grid-cols-3 gap-6 mb-12">
+    <div className="grid grid-cols-3 gap-6 mb-8">
       <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700">
         <div className="text-3xl font-bold text-pink-500 mb-2">
           {totalPackets ? Number(totalPackets).toLocaleString() : "-"}

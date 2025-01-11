@@ -4,6 +4,8 @@ import { REDPACKET_ADDRESS, REDPACKET_ABI } from "../config/contracts";
 import Image from "next/image";
 import { formatEther, Hex } from "viem";
 
+type TabType = "created" | "claimed";
+
 interface PacketInfo {
   packetId: Hex;
   creator: Hex;
@@ -19,18 +21,19 @@ interface PacketInfo {
   nftIds: bigint[];
 }
 
-interface UserPacketsProps {
+export const UserPackets = ({
+  onPacketClick,
+}: {
   onPacketClick: (packetId: string) => void;
-}
-
-export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
+}) => {
   const { address } = useAccount();
   const [currentPage, setCurrentPage] = useState(1);
+  const [activeTab, setActiveTab] = useState<TabType>("created");
   const pageSize = 10;
   const [packetDetails, setPacketDetails] = useState<PacketInfo[]>([]);
 
-  // 获取用户红包ID列表
-  const { data: userPacketsData } = useReadContract({
+  // 获取用户创建的红包
+  const { data: createdPacketsData } = useReadContract({
     address: REDPACKET_ADDRESS,
     abi: REDPACKET_ABI,
     functionName: "getUserCreatedPackets",
@@ -40,12 +43,29 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
       BigInt(pageSize),
     ],
     query: {
-      enabled: !!address,
+      enabled: !!address && activeTab === "created",
     },
   });
 
-  const userPacketIds = userPacketsData?.[0];
-  const totalPackets = userPacketsData?.[1];
+  // 获取用户领取的红包
+  const { data: claimedPacketsData } = useReadContract({
+    address: REDPACKET_ADDRESS,
+    abi: REDPACKET_ABI,
+    functionName: "getUserClaimedPackets",
+    args: [
+      address as `0x${string}`,
+      BigInt((currentPage - 1) * pageSize),
+      BigInt(pageSize),
+    ],
+    query: {
+      enabled: !!address && activeTab === "claimed",
+    },
+  });
+
+  const userPacketIds =
+    activeTab === "created" ? createdPacketsData?.[0] : claimedPacketsData?.[0];
+  const totalPackets =
+    activeTab === "created" ? createdPacketsData?.[1] : claimedPacketsData?.[1];
 
   // 批量获取红包详情
   const { data: packetInfos, refetch: refetchPacketInfos } = useReadContract({
@@ -63,7 +83,11 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
     if (userPacketIds && userPacketIds.length > 0) {
       refetchPacketInfos();
     }
-  }, [userPacketIds, currentPage, refetchPacketInfos]);
+
+    if (!address) {
+      setPacketDetails([]);
+    }
+  }, [userPacketIds, currentPage, refetchPacketInfos, address]);
 
   // 当获取到详情时更新状态
   useEffect(() => {
@@ -90,6 +114,11 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
     ? Math.ceil(Number(totalPackets) / pageSize)
     : 0;
 
+  // Tab 切换时重置页码
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
+
   const getImageUrl = (uri: string) => {
     if (!uri) return "";
     if (uri.startsWith("ipfs://")) {
@@ -104,15 +133,44 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
 
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
-      <h2 className="text-xl font-bold mb-6 flex items-center">
-        <span className="bg-indigo-500 p-2 rounded-lg mr-3">📦</span>
-        Your Created Packets
-      </h2>
+      {/* Tabs */}
+      <div className="flex space-x-4 mb-6">
+        <button
+          onClick={() => setActiveTab("created")}
+          className={`flex items-center px-4 py-2 rounded-lg transition-colors duration-200 ${
+            activeTab === "created"
+              ? "bg-indigo-500 text-white"
+              : "bg-gray-700/50 text-gray-400 hover:bg-gray-700"
+          }`}
+        >
+          <span className="mr-2">📦</span>
+          Created
+        </button>
+        <button
+          onClick={() => setActiveTab("claimed")}
+          className={`flex items-center px-4 py-2 rounded-lg transition-colors duration-200 ${
+            activeTab === "claimed"
+              ? "bg-pink-500 text-white"
+              : "bg-gray-700/50 text-gray-400 hover:bg-gray-700"
+          }`}
+        >
+          <span className="mr-2">🎁</span>
+          Claimed
+        </button>
+      </div>
 
-      <div className="space-y-4">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold bg-gradient-to-r from-indigo-400 to-pink-400 bg-clip-text text-transparent">
+          {`Your ${
+            activeTab === "created" ? "Created" : "Claimed"
+          } Red Packets`}
+        </h2>
+      </div>
+
+      <div className="space-y-4 ">
         {packetDetails.length > 0 ? (
           <>
-            <div className="grid gap-4">
+            <div className="grid gap-4 max-h-[1000px] overflow-y-auto">
               {packetDetails.map((packet, index) => (
                 <div
                   key={index}
