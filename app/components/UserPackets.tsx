@@ -63,7 +63,7 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
     if (userPacketIds && userPacketIds.length > 0) {
       refetchPacketInfos();
     }
-  }, [userPacketIds, currentPage]);
+  }, [userPacketIds, currentPage, refetchPacketInfos]);
 
   // 当获取到详情时更新状态
   useEffect(() => {
@@ -125,9 +125,6 @@ export const UserPackets = ({ onPacketClick }: UserPacketsProps) => {
                       alt="Packet Cover"
                       fill
                       className="object-cover"
-                      onError={(e: any) => {
-                        e.target.src = "/default-cover.jpg";
-                      }}
                     />
                   </div>
                   <div className="flex-grow">
