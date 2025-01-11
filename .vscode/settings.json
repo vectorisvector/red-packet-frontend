@@ -1,0 +1,24 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.codeActionsOnSave.mode": "problems",
+  "editor.tabSize": 2,
+  "cSpell.words": [
+    "clickhouse",
+    "dateadd",
+    "depyronick",
+    "influxdata",
+    "kafkajs",
+    "klines",
+    "nestjs",
+    "questdb",
+    "rebalance",
+    "REDPACKET",
+    "solana",
+    "turbopack",
+    "uuidv",
+    "WSOL"
+  ]
+}
