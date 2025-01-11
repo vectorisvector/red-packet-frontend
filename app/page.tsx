@@ -13,7 +13,7 @@ import {
 } from "wagmi";
 import Image from "next/image";
 
-type TabType = "ETH" | "ERC20" | "ERC721";
+type TabType = "MON" | "ERC20" | "ERC721";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -24,7 +24,7 @@ export default function Home() {
   }, []);
 
   const { address } = useAccount();
-  const [activeTab, setActiveTab] = useState<TabType>("ETH");
+  const [activeTab, setActiveTab] = useState<TabType>("MON");
   const [count, setCount] = useState("10");
   const [amount, setAmount] = useState("1");
   const [tokenAddress, setTokenAddress] = useState("");
@@ -120,7 +120,7 @@ export default function Home() {
   const handleCreate = async () => {
     const expireTime = Math.floor(Date.now() / 1000) + 3600; // 1小时后过期
 
-    if (activeTab === "ETH") {
+    if (activeTab === "MON") {
       writeContract({
         address: REDPACKET_ADDRESS,
         abi: REDPACKET_ABI,
@@ -267,7 +267,7 @@ export default function Home() {
 
               {/* Tabs */}
               <div className="flex space-x-4 mb-6">
-                <TabButton tab="ETH" />
+                <TabButton tab="MON" />
                 <TabButton tab="ERC20" />
                 <TabButton tab="ERC721" />
               </div>
@@ -337,7 +337,7 @@ export default function Home() {
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">
                         Total Amount{" "}
-                        {activeTab === "ETH" ? "(ETH)" : "(Tokens)"}
+                        {activeTab === "MON" ? "(MON)" : "(Tokens)"}
                       </label>
                       <input
                         type="number"
@@ -579,7 +579,7 @@ export default function Home() {
               )}
               <p>
                 <span className="text-gray-400">Type:</span>{" "}
-                {["ETH", "ERC20", "ERC721"][Number(createEvent.packetType)]}
+                {["MON", "ERC20", "ERC721"][Number(createEvent.packetType)]}
               </p>
             </div>
           </div>
