@@ -2,17 +2,19 @@
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useState } from "react";
-import { Hex, parseEther } from "viem";
+import { decodeEventLog, formatUnits, Hex, parseEther, parseUnits } from "viem";
 import { REDPACKET_ADDRESS, REDPACKET_ABI } from "./config/contracts";
 import {
   useWriteContract,
   useWaitForTransactionReceipt,
   useAccount,
   useReadContract,
-  useWatchContractEvent,
 } from "wagmi";
 import Image from "next/image";
 import { EventModal } from "./components/EventModal";
+import { erc20Abi } from "viem";
+import { Stats } from "./components/Stats";
+import { UserPackets } from "./components/UserPackets";
 
 type TabType = "MON" | "ERC20" | "ERC721";
 
@@ -35,11 +37,15 @@ export default function Home() {
   const [coverURI, setCoverURI] = useState(
     "https://pbs.twimg.com/media/Gg3Wf5JWMAAPQDr?format=jpg&name=4096x4096"
   );
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventType, setEventType] = useState<"create" | "claim" | null>(null);
   const [createEvent, setCreateEvent] = useState<{
     packetId: Hex;
     creator: Hex;
     totalAmount: bigint;
     count: bigint;
+    expireTime: bigint;
+    isRandom: boolean;
     coverURI: string;
     token: Hex;
     packetType: number;
@@ -50,17 +56,32 @@ export default function Home() {
     amount: bigint;
     tokenId: bigint;
   } | null>(null);
+  const [tokenDecimals, setTokenDecimals] = useState<number>(18);
 
-  const { writeContract, data: hash } = useWriteContract();
+  const { writeContract, data: hash } = useWriteContract({});
   const { writeContract: writeClaimContract, data: claimHash } =
     useWriteContract();
 
-  const { isLoading: isCreating, isSuccess: isCreateSuccess } =
-    useWaitForTransactionReceipt({ hash });
-  const { isLoading: isClaiming, isSuccess: isClaimSuccess } =
-    useWaitForTransactionReceipt({
-      hash: claimHash,
-    });
+  const {
+    isLoading: isCreating,
+    isSuccess: isCreateSuccess,
+    data: createReceipt,
+  } = useWaitForTransactionReceipt({
+    hash,
+    query: {
+      enabled: !!hash,
+    },
+  });
+  const {
+    isLoading: isClaiming,
+    isSuccess: isClaimSuccess,
+    data: claimReceipt,
+  } = useWaitForTransactionReceipt({
+    hash: claimHash,
+    query: {
+      enabled: !!claimHash,
+    },
+  });
 
   // 查询红包信息
   const { data: packetInfo } = useReadContract({
@@ -68,98 +89,141 @@ export default function Home() {
     abi: REDPACKET_ABI,
     functionName: "getPacketInfo",
     args: packetId ? [packetId as Hex] : undefined,
-  });
-
-  // Watch for PacketCreated events
-  useWatchContractEvent({
-    address: REDPACKET_ADDRESS,
-    abi: REDPACKET_ABI,
-    eventName: "PacketCreated",
-    onLogs: (logs) => {
-      const event = logs[0];
-      if (event) {
-        setCreateEvent({
-          packetId: event.args.packetId as Hex,
-          creator: event.args.creator as Hex,
-          totalAmount: event.args.totalAmount as bigint,
-          count: event.args.count as bigint,
-          coverURI: event.args.coverURI as string,
-          token: event.args.token as Hex,
-          packetType: event.args.packetType as number,
-        });
-      }
+    query: {
+      enabled: !!packetId && packetId.length === 66,
     },
   });
 
-  // Watch for PacketClaimed events
-  useWatchContractEvent({
-    address: REDPACKET_ADDRESS,
-    abi: REDPACKET_ABI,
-    eventName: "PacketClaimed",
-    onLogs: (logs) => {
-      const event = logs[0];
-      if (event) {
-        setClaimEvent({
-          packetId: event.args.packetId as Hex,
-          claimer: event.args.claimer as Hex,
-          amount: event.args.amount as bigint,
-          tokenId: event.args.tokenId as bigint,
-        });
-      }
+  // 获取 ERC20 代币精度
+  const { data: decimals } = useReadContract({
+    address: tokenAddress as `0x${string}`,
+    abi: erc20Abi,
+    functionName: "decimals",
+    query: {
+      enabled: activeTab === "ERC20" && tokenAddress.length === 42,
     },
   });
+
+  // 当获取到精度时更新状态
+  useEffect(() => {
+    if (decimals !== undefined) {
+      setTokenDecimals(Number(decimals));
+    }
+  }, [decimals]);
 
   // 创建红包
   const handleCreate = async () => {
     const expireTime = Math.floor(Date.now() / 1000) + 3600; // 1小时后过期
 
-    if (activeTab === "MON") {
-      writeContract({
-        address: REDPACKET_ADDRESS,
-        abi: REDPACKET_ABI,
-        functionName: "createETHPacket",
-        args: [BigInt(count), BigInt(expireTime), isRandom, coverURI],
-        value: parseEther(amount),
-      });
-    } else if (activeTab === "ERC20") {
-      writeContract({
-        address: REDPACKET_ADDRESS,
-        abi: REDPACKET_ABI,
-        functionName: "createERC20Packet",
-        args: [
-          BigInt(count),
-          BigInt(expireTime),
-          isRandom,
-          coverURI,
-          tokenAddress as Hex,
-          parseEther(amount),
-        ],
-      });
-    } else {
-      const tokenIdArray = tokenIds.split(",").map((id) => BigInt(id.trim()));
-      writeContract({
-        address: REDPACKET_ADDRESS,
-        abi: REDPACKET_ABI,
-        functionName: "createERC721Packet",
-        args: [
-          BigInt(count),
-          BigInt(expireTime),
-          coverURI,
-          tokenAddress as Hex,
-          tokenIdArray,
-        ],
-      });
+    try {
+      if (activeTab === "MON") {
+        await writeContract({
+          address: REDPACKET_ADDRESS,
+          abi: REDPACKET_ABI,
+          functionName: "createETHPacket",
+          args: [BigInt(count), BigInt(expireTime), isRandom, coverURI],
+          value: parseEther(amount),
+        });
+      } else if (activeTab === "ERC20") {
+        await writeContract({
+          address: REDPACKET_ADDRESS,
+          abi: REDPACKET_ABI,
+          functionName: "createERC20Packet",
+          args: [
+            BigInt(count),
+            BigInt(expireTime),
+            isRandom,
+            coverURI,
+            tokenAddress as `0x${string}`,
+            parseUnits(amount, tokenDecimals),
+          ],
+        });
+      } else {
+        const tokenIdArray = tokenIds.split(",").map((id) => BigInt(id.trim()));
+        await writeContract({
+          address: REDPACKET_ADDRESS,
+          abi: REDPACKET_ABI,
+          functionName: "createERC721Packet",
+          args: [
+            BigInt(count),
+            BigInt(expireTime),
+            coverURI,
+            tokenAddress as `0x${string}`,
+            tokenIdArray,
+          ],
+        });
+      }
+    } catch (error) {
+      console.error("Create packet error:", error);
     }
   };
 
+  // 监听交易完成
+  useEffect(() => {
+    if (isCreateSuccess && createReceipt) {
+      setShowEventModal(true);
+      setEventType("create");
+      // 解析日志
+      for (const log of createReceipt.logs) {
+        const decodedLog = decodeEventLog({
+          abi: REDPACKET_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+
+        // 根据日志类型设置事件
+        if (decodedLog.eventName === "PacketCreated") {
+          setCreateEvent({
+            packetId: decodedLog.args.packetId,
+            creator: decodedLog.args.creator,
+            totalAmount: decodedLog.args.totalAmount,
+            count: decodedLog.args.count,
+            expireTime: decodedLog.args.expireTime,
+            isRandom: decodedLog.args.isRandom,
+            coverURI: decodedLog.args.coverURI,
+            token: decodedLog.args.token,
+            packetType: decodedLog.args.packetType,
+          });
+          setEventType("create");
+          setShowEventModal(true);
+        }
+      }
+    }
+
+    if (isClaimSuccess) {
+      setShowEventModal(true);
+      setEventType("claim");
+      // 解析日志
+      for (const log of claimReceipt.logs) {
+        const decodedLog = decodeEventLog({
+          abi: REDPACKET_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        if (decodedLog.eventName === "PacketClaimed") {
+          setClaimEvent({
+            packetId: decodedLog.args.packetId,
+            claimer: decodedLog.args.claimer,
+            amount: decodedLog.args.amount,
+            tokenId: decodedLog.args.tokenId,
+          });
+        }
+      }
+    }
+  }, [isCreateSuccess, isClaimSuccess, createReceipt, claimReceipt]);
+
   // 领取红包
   const handleClaim = async () => {
-    writeClaimContract({
-      address: REDPACKET_ADDRESS,
-      abi: REDPACKET_ABI,
-      functionName: "claimPacket",
-      args: [packetId as Hex],
-    });
+    try {
+      await writeClaimContract({
+        address: REDPACKET_ADDRESS,
+        abi: REDPACKET_ABI,
+        functionName: "claimPacket",
+        args: [packetId as `0x${string}`],
+      });
+    } catch (error) {
+      console.error("Claim packet error:", error);
+    }
   };
 
   // Tab切换按钮组件
@@ -185,22 +249,9 @@ export default function Home() {
     return uri;
   };
 
-  const [showEventModal, setShowEventModal] = useState(false);
-  const [eventType, setEventType] = useState<"create" | "claim" | null>(null);
-
-  useEffect(() => {
-    if (createEvent) {
-      setEventType("create");
-      setShowEventModal(true);
-    }
-  }, [createEvent]);
-
-  useEffect(() => {
-    if (claimEvent) {
-      setEventType("claim");
-      setShowEventModal(true);
-    }
-  }, [claimEvent]);
+  const handlePacketClick = (packetId: string) => {
+    setPacketId(packetId);
+  };
 
   // 如果组件未挂载，返回null或加载占位符
   if (!mounted) {
@@ -257,244 +308,132 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-6">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-12">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">
-            Red Packet DApp
-          </h1>
-          <ConnectButton />
+      <div className="max-w-7xl mx-auto p-6 flex gap-6">
+        {/* Left Column */}
+        <div className="w-[350px] space-y-6">
+          {/* User Packets List */}
+          <UserPackets onPacketClick={handlePacketClick} />
         </div>
 
-        {address ? (
-          <div className="space-y-8">
-            {/* Create Red Packet Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
-              <h2 className="text-xl font-bold mb-6 flex items-center">
-                <span className="bg-indigo-500 p-2 rounded-lg mr-3">🎁</span>
-                Create Red Packet
-              </h2>
+        <div className="flex-1">
+          {/* Stats Section */}
+          <Stats />
 
-              {/* Tabs */}
-              <div className="flex space-x-4 mb-6">
-                <TabButton tab="MON" />
-                <TabButton tab="ERC20" />
-                <TabButton tab="ERC721" />
-              </div>
+          {/* Header */}
+          <div className="flex justify-between items-center mb-12">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-500 to-violet-500 bg-clip-text text-transparent">
+              Red Packet DApp
+            </h1>
+            <ConnectButton />
+          </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Cover URI
-                  </label>
-                  <div className="space-y-4">
-                    <input
-                      type="text"
-                      value={coverURI}
-                      onChange={(e) => setCoverURI(e.target.value)}
-                      className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="ipfs://..."
-                    />
-                    {/* Cover Preview */}
-                    <div className="relative w-full h-48 rounded-lg overflow-hidden bg-gray-800">
-                      {coverURI && (
-                        <Image
-                          src={getImageUrl(coverURI)}
-                          alt="Cover Preview"
-                          fill
-                          className="object-cover transition-opacity duration-300"
-                        />
-                      )}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        {!coverURI && (
-                          <span className="text-gray-500">
-                            Enter URI to preview cover image
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {(activeTab === "ERC20" || activeTab === "ERC721") && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Token Address
-                    </label>
-                    <input
-                      type="text"
-                      value={tokenAddress}
-                      onChange={(e) => setTokenAddress(e.target.value)}
-                      className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="0x..."
-                    />
-                  </div>
-                )}
-
-                {activeTab !== "ERC721" && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Number of Packets
-                      </label>
-                      <input
-                        type="number"
-                        value={count}
-                        onChange={(e) => setCount(e.target.value)}
-                        className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Total Amount{" "}
-                        {activeTab === "MON" ? "(MON)" : "(Tokens)"}
-                      </label>
-                      <input
-                        type="number"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-
-                    <label className="flex items-center space-x-3 text-gray-300 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isRandom}
-                        onChange={(e) => setIsRandom(e.target.checked)}
-                        className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
-                      />
-                      <span>Random Amount Distribution</span>
-                    </label>
-                  </>
-                )}
-
-                {activeTab === "ERC721" && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Token IDs (comma separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={tokenIds}
-                      onChange={(e) => setTokenIds(e.target.value)}
-                      className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="1, 2, 3"
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={handleCreate}
-                  disabled={isCreating}
-                  className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-indigo-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isCreating ? (
-                    <span className="flex items-center justify-center">
-                      <svg
-                        className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      Creating...
+          {address ? (
+            <div className="grid grid-cols-2 gap-8">
+              {/* Left Column - Create Red Packet */}
+              <div className="space-y-8">
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
+                  <h2 className="text-xl font-bold mb-6 flex items-center">
+                    <span className="bg-indigo-500 p-2 rounded-lg mr-3">
+                      🎁
                     </span>
-                  ) : (
-                    "Create Packet"
-                  )}
-                </button>
-
-                {isCreateSuccess && (
-                  <div className="bg-green-500/20 text-green-400 px-4 py-2 rounded-lg">
-                    ✨ Created Successfully!
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Query and Claim Card */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
-              <h2 className="text-xl font-bold mb-6 flex items-center">
-                <span className="bg-pink-500 p-2 rounded-lg mr-3">🔍</span>
-                Query/Claim Red Packet
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Packet ID
-                  </label>
-                  <input
-                    type="text"
-                    value={packetId}
-                    onChange={(e) => setPacketId(e.target.value)}
-                    placeholder="Enter packet ID"
-                    className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-500"
-                  />
-                </div>
-
-                {packetInfo && (
-                  <div className="space-y-4 mt-6 p-4 bg-gray-700/30 rounded-lg">
-                    <div className="relative w-full h-48 rounded-lg overflow-hidden mb-4">
-                      <Image
-                        src={getImageUrl(packetInfo[6])}
-                        alt="Red Packet Cover"
-                        fill
-                        className="object-cover"
-                      />
+                    Create Red Packet
+                  </h2>
+                  {/* Create Form */}
+                  <div className="space-y-4">
+                    <div className="flex space-x-2 mb-4">
+                      <TabButton tab="MON" />
+                      <TabButton tab="ERC20" />
+                      <TabButton tab="ERC721" />
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <p className="text-gray-400 text-sm">Creator</p>
-                        <p className="font-mono">
-                          {packetInfo[0].slice(0, 6)}...
-                          {packetInfo[0].slice(-4)}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-gray-400 text-sm">Total Amount</p>
-                        <p className="font-mono">
-                          {packetInfo[1].toString()} wei
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-gray-400 text-sm">Total Count</p>
-                        <p>{packetInfo[2].toString()}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-gray-400 text-sm">Remaining</p>
-                        <p>{packetInfo[3].toString()}</p>
-                      </div>
-                      <div className="col-span-2 space-y-1">
-                        <p className="text-gray-400 text-sm">Expire Time</p>
-                        <p>
-                          {new Date(
-                            Number(packetInfo[4]) * 1000
-                          ).toLocaleString()}
-                        </p>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Cover URI
+                      </label>
+                      <div className="space-y-4">
+                        <input
+                          type="text"
+                          value={coverURI}
+                          onChange={(e) => setCoverURI(e.target.value)}
+                          className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="ipfs://..."
+                        />
                       </div>
                     </div>
+                    {(activeTab === "ERC20" || activeTab === "ERC721") && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Token Address
+                        </label>
+                        <input
+                          type="text"
+                          value={tokenAddress}
+                          onChange={(e) => setTokenAddress(e.target.value)}
+                          className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="0x..."
+                        />
+                      </div>
+                    )}
+
+                    {activeTab !== "ERC721" && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Number of Packets
+                          </label>
+                          <input
+                            type="number"
+                            value={count}
+                            onChange={(e) => setCount(e.target.value)}
+                            className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Total Amount{" "}
+                            {activeTab === "MON" ? "(MON)" : "(Tokens)"}
+                          </label>
+                          <input
+                            type="number"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <label className="flex items-center space-x-3 text-gray-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isRandom}
+                            onChange={(e) => setIsRandom(e.target.checked)}
+                            className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
+                          />
+                          <span>Random Amount Distribution</span>
+                        </label>
+                      </>
+                    )}
+
+                    {activeTab === "ERC721" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Token IDs (comma separated)
+                        </label>
+                        <input
+                          type="text"
+                          value={tokenIds}
+                          onChange={(e) => setTokenIds(e.target.value)}
+                          className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="1, 2, 3"
+                        />
+                      </div>
+                    )}
 
                     <button
-                      onClick={handleClaim}
-                      disabled={isClaiming}
-                      className="w-full mt-4 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-lg px-4 py-2 hover:from-pink-600 hover:to-rose-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleCreate}
+                      disabled={isCreating}
+                      className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-indigo-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isClaiming ? (
+                      {isCreating ? (
                         <span className="flex items-center justify-center">
                           <svg
                             className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
@@ -516,44 +455,204 @@ export default function Home() {
                               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                             ></path>
                           </svg>
-                          Claiming...
+                          Creating...
                         </span>
                       ) : (
-                        "Claim Packet"
+                        "Create Packet"
                       )}
                     </button>
 
-                    {isClaimSuccess && (
-                      <div className="bg-green-500/20 text-green-400 px-4 py-2 rounded-lg mt-4">
-                        🎉 Claimed Successfully!
+                    {isCreateSuccess && (
+                      <div className="bg-green-500/20 text-green-400 px-4 py-2 rounded-lg">
+                        ✨ Created Successfully!
+                      </div>
+                    )}
+
+                    {/* Cover Preview */}
+                    <div className="relative w-full aspect-[3/4] rounded-lg overflow-hidden bg-gray-800">
+                      {coverURI && (
+                        <Image
+                          src={getImageUrl(coverURI)}
+                          alt="Cover Preview"
+                          fill
+                          className="object-cover transition-opacity duration-300"
+                        />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        {!coverURI && (
+                          <span className="text-gray-500">
+                            Enter URI to preview cover image
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column - Query and Claim */}
+              <div className="space-y-8">
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
+                  <h2 className="text-xl font-bold mb-6 flex items-center">
+                    <span className="bg-pink-500 p-2 rounded-lg mr-3">🔍</span>
+                    Query & Claim Packet
+                  </h2>
+                  {/* Query and Claim Form */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Packet ID
+                      </label>
+                      <input
+                        type="text"
+                        value={packetId}
+                        onChange={(e) => setPacketId(e.target.value)}
+                        className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder="0x..."
+                      />
+                    </div>
+
+                    {/* Packet Info Display */}
+                    {packetInfo && (
+                      <div className="mt-6 space-y-4">
+                        <div className="grid gap-4">
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Packet ID</p>
+                            <p className="font-mono">
+                              {packetInfo.packetId.slice(0, 6)}...
+                              {packetInfo.packetId.slice(-4)}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Creator</p>
+                            <p className="font-mono">
+                              {packetInfo.creator.slice(0, 6)}...
+                              {packetInfo.creator.slice(-4)}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">
+                              Total Amount
+                            </p>
+                            <p className="font-mono">
+                              {packetInfo.packetType !== 2
+                                ? formatUnits(
+                                    packetInfo.totalAmount,
+                                    tokenDecimals
+                                  )
+                                : packetInfo.totalAmount.toString()}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">
+                              Remaining Amount
+                            </p>
+                            <p className="font-mono">
+                              {packetInfo.packetType !== 2
+                                ? formatUnits(
+                                    packetInfo.remainingAmount,
+                                    tokenDecimals
+                                  )
+                                : packetInfo.remainingAmount.toString()}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Total Count</p>
+                            <p>{packetInfo.count.toString()}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Remaining</p>
+                            <p>{packetInfo.remaining.toString()}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Is Random</p>
+                            <p>{packetInfo.isRandom ? "Yes" : "No"}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-gray-400 text-sm">Token Type</p>
+                            <p>
+                              {packetInfo.packetType === 0
+                                ? "MON"
+                                : packetInfo.packetType === 1
+                                ? "ERC20"
+                                : "ERC721"}
+                            </p>
+                          </div>
+                          {packetInfo.packetType !== 0 && (
+                            <div className="col-span-2 space-y-1">
+                              <p className="text-gray-400 text-sm">
+                                Token Address
+                              </p>
+                              <p>
+                                {packetInfo.token.slice(0, 6)}...
+                                {packetInfo.token.slice(-4)}
+                              </p>
+                            </div>
+                          )}
+                          {packetInfo.packetType === 2 && (
+                            <div className="col-span-2 space-y-1">
+                              <p className="text-gray-400 text-sm">Token IDs</p>
+                              <p>
+                                {packetInfo.nftIds
+                                  .map((id) => id.toString())
+                                  .join(", ")}
+                              </p>
+                            </div>
+                          )}
+                          <div className="col-span-2 space-y-1">
+                            <p className="text-gray-400 text-sm">Expire Time</p>
+                            <p>
+                              {new Date(
+                                Number(packetInfo.expireTime) * 1000
+                              ).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={handleClaim}
+                          disabled={isClaiming}
+                          className="w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-pink-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isClaiming ? "Claiming..." : "Claim Packet"}
+                        </button>
+                        <div className="relative w-full aspect-[3/4] rounded-lg overflow-hidden mb-4">
+                          <Image
+                            src={getImageUrl(packetInfo.coverURI)}
+                            alt="Red Packet Cover"
+                            fill
+                            className="object-cover"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
-                )}
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="text-center py-20">
-            <h2 className="text-2xl font-bold text-gray-400 mb-4">
-              Connect your wallet to continue
-            </h2>
-            <p className="text-gray-500">
-              You need to connect your wallet to create or claim red packets
-            </p>
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="text-center py-20">
+              <h2 className="text-2xl font-bold text-gray-400 mb-4">
+                Connect your wallet to continue
+              </h2>
+              <p className="text-gray-500">
+                You need to connect your wallet to create or claim red packets
+              </p>
+            </div>
+          )}
 
-      <EventModal
-        showEventModal={showEventModal}
-        setShowEventModal={setShowEventModal}
-        eventType={eventType}
-        createEvent={createEvent}
-        claimEvent={claimEvent}
-        activeTab={activeTab}
-        getImageUrl={getImageUrl}
-      />
+          {/* Event Modal */}
+          <EventModal
+            showEventModal={showEventModal}
+            setShowEventModal={setShowEventModal}
+            eventType={eventType}
+            createEvent={createEvent}
+            claimEvent={claimEvent}
+            activeTab={activeTab}
+            getImageUrl={getImageUrl}
+            onClose={handlePacketClick}
+          />
+        </div>
+      </div>
     </main>
   );
 }

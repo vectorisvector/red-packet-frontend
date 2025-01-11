@@ -1,7 +1,23 @@
-export const REDPACKET_ADDRESS = "0x118a5F97bBf753ba56516592194B3c1Ae3701E81";
+export const REDPACKET_ADDRESS = "0x7255618eB917883FBB449D851965f824a5aD8875";
 
 export const REDPACKET_ABI = [
   { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+  {
+    inputs: [{ internalType: "address", name: "target", type: "address" }],
+    name: "AddressEmptyCode",
+    type: "error",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "implementation", type: "address" },
+    ],
+    name: "ERC1967InvalidImplementation",
+    type: "error",
+  },
+  { inputs: [], name: "ERC1967NonPayable", type: "error" },
+  { inputs: [], name: "FailedCall", type: "error" },
+  { inputs: [], name: "InvalidInitialization", type: "error" },
+  { inputs: [], name: "NotInitializing", type: "error" },
   {
     inputs: [{ internalType: "address", name: "owner", type: "address" }],
     name: "OwnableInvalidOwner",
@@ -15,6 +31,12 @@ export const REDPACKET_ABI = [
   {
     inputs: [{ internalType: "address", name: "token", type: "address" }],
     name: "SafeERC20FailedOperation",
+    type: "error",
+  },
+  { inputs: [], name: "UUPSUnauthorizedCallContext", type: "error" },
+  {
+    inputs: [{ internalType: "bytes32", name: "slot", type: "bytes32" }],
+    name: "UUPSUnsupportedProxiableUUID",
     type: "error",
   },
   {
@@ -47,12 +69,25 @@ export const REDPACKET_ABI = [
       },
       {
         indexed: false,
-        internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
+        internalType: "uint256[]",
+        name: "tokenIds",
+        type: "uint256[]",
       },
     ],
     name: "EmergencyWithdrawNFT",
+    type: "event",
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: "uint64",
+        name: "version",
+        type: "uint64",
+      },
+    ],
+    name: "Initialized",
     type: "event",
   },
   {
@@ -84,7 +119,7 @@ export const REDPACKET_ABI = [
         type: "bytes32",
       },
       {
-        indexed: false,
+        indexed: true,
         internalType: "address",
         name: "claimer",
         type: "address",
@@ -115,7 +150,7 @@ export const REDPACKET_ABI = [
         type: "bytes32",
       },
       {
-        indexed: false,
+        indexed: true,
         internalType: "address",
         name: "creator",
         type: "address",
@@ -134,19 +169,26 @@ export const REDPACKET_ABI = [
       },
       {
         indexed: false,
+        internalType: "uint256",
+        name: "expireTime",
+        type: "uint256",
+      },
+      { indexed: false, internalType: "bool", name: "isRandom", type: "bool" },
+      {
+        indexed: false,
         internalType: "string",
         name: "coverURI",
         type: "string",
       },
       {
-        indexed: false,
+        indexed: true,
         internalType: "address",
         name: "token",
         type: "address",
       },
       {
         indexed: false,
-        internalType: "enum RedPacket.PacketType",
+        internalType: "enum RedPacketImpl.PacketType",
         name: "packetType",
         type: "uint8",
       },
@@ -183,7 +225,7 @@ export const REDPACKET_ABI = [
         type: "bytes32",
       },
       {
-        indexed: false,
+        indexed: true,
         internalType: "address",
         name: "creator",
         type: "address",
@@ -199,9 +241,40 @@ export const REDPACKET_ABI = [
     type: "event",
   },
   {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: true,
+        internalType: "address",
+        name: "implementation",
+        type: "address",
+      },
+    ],
+    name: "Upgraded",
+    type: "event",
+  },
+  {
+    inputs: [],
+    name: "UPGRADE_INTERFACE_VERSION",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    name: "allPacketIds",
+    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ internalType: "bytes32", name: "packetId", type: "bytes32" }],
     name: "claimPacket",
-    outputs: [],
+    outputs: [
+      { internalType: "bytes32", name: "id", type: "bytes32" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+      { internalType: "uint256", name: "tokenId", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -215,7 +288,7 @@ export const REDPACKET_ABI = [
       { internalType: "uint256", name: "amount", type: "uint256" },
     ],
     name: "createERC20Packet",
-    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    outputs: [{ internalType: "bytes32", name: "id", type: "bytes32" }],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -228,7 +301,7 @@ export const REDPACKET_ABI = [
       { internalType: "uint256[]", name: "tokenIds", type: "uint256[]" },
     ],
     name: "createERC721Packet",
-    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    outputs: [{ internalType: "bytes32", name: "id", type: "bytes32" }],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -240,31 +313,40 @@ export const REDPACKET_ABI = [
       { internalType: "string", name: "coverURI", type: "string" },
     ],
     name: "createETHPacket",
-    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    outputs: [{ internalType: "bytes32", name: "id", type: "bytes32" }],
     stateMutability: "payable",
     type: "function",
   },
   {
     inputs: [{ internalType: "address", name: "token", type: "address" }],
     name: "emergencyWithdrawERC20",
-    outputs: [],
+    outputs: [
+      { internalType: "address", name: "tokenAddress", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
   {
     inputs: [
       { internalType: "address", name: "token", type: "address" },
-      { internalType: "uint256", name: "tokenId", type: "uint256" },
+      { internalType: "uint256[]", name: "tokenIds", type: "uint256[]" },
     ],
     name: "emergencyWithdrawERC721",
-    outputs: [],
+    outputs: [
+      { internalType: "address", name: "tokenAddress", type: "address" },
+      { internalType: "uint256[]", name: "ids", type: "uint256[]" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
   {
     inputs: [],
     name: "emergencyWithdrawETH",
-    outputs: [],
+    outputs: [
+      { internalType: "address", name: "tokenAddress", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -272,15 +354,122 @@ export const REDPACKET_ABI = [
     inputs: [{ internalType: "bytes32", name: "packetId", type: "bytes32" }],
     name: "getPacketInfo",
     outputs: [
-      { internalType: "address", name: "creator", type: "address" },
-      { internalType: "uint256", name: "totalAmount", type: "uint256" },
-      { internalType: "uint256", name: "count", type: "uint256" },
-      { internalType: "uint256", name: "remaining", type: "uint256" },
-      { internalType: "uint256", name: "expireTime", type: "uint256" },
-      { internalType: "bool", name: "isRandom", type: "bool" },
-      { internalType: "string", name: "coverURI", type: "string" },
+      {
+        components: [
+          { internalType: "bytes32", name: "packetId", type: "bytes32" },
+          { internalType: "address", name: "creator", type: "address" },
+          { internalType: "uint256", name: "totalAmount", type: "uint256" },
+          { internalType: "uint256", name: "remainingAmount", type: "uint256" },
+          { internalType: "uint256", name: "count", type: "uint256" },
+          { internalType: "uint256", name: "remaining", type: "uint256" },
+          { internalType: "uint256", name: "expireTime", type: "uint256" },
+          { internalType: "bool", name: "isRandom", type: "bool" },
+          { internalType: "string", name: "coverURI", type: "string" },
+          { internalType: "address", name: "token", type: "address" },
+          {
+            internalType: "enum RedPacketImpl.PacketType",
+            name: "packetType",
+            type: "uint8",
+          },
+          { internalType: "uint256[]", name: "nftIds", type: "uint256[]" },
+        ],
+        internalType: "struct RedPacketImpl.PacketView",
+        name: "packetInfo",
+        type: "tuple",
+      },
     ],
     stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "bytes32[]", name: "packetIds", type: "bytes32[]" },
+    ],
+    name: "getPacketsInfo",
+    outputs: [
+      {
+        components: [
+          { internalType: "bytes32", name: "packetId", type: "bytes32" },
+          { internalType: "address", name: "creator", type: "address" },
+          { internalType: "uint256", name: "totalAmount", type: "uint256" },
+          { internalType: "uint256", name: "remainingAmount", type: "uint256" },
+          { internalType: "uint256", name: "count", type: "uint256" },
+          { internalType: "uint256", name: "remaining", type: "uint256" },
+          { internalType: "uint256", name: "expireTime", type: "uint256" },
+          { internalType: "bool", name: "isRandom", type: "bool" },
+          { internalType: "string", name: "coverURI", type: "string" },
+          { internalType: "address", name: "token", type: "address" },
+          {
+            internalType: "enum RedPacketImpl.PacketType",
+            name: "packetType",
+            type: "uint8",
+          },
+          { internalType: "uint256[]", name: "nftIds", type: "uint256[]" },
+        ],
+        internalType: "struct RedPacketImpl.PacketView[]",
+        name: "packetInfos",
+        type: "tuple[]",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "getTotalPackets",
+    outputs: [{ internalType: "uint256", name: "total", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "user", type: "address" },
+      { internalType: "uint256", name: "offset", type: "uint256" },
+      { internalType: "uint256", name: "limit", type: "uint256" },
+    ],
+    name: "getUserClaimedPackets",
+    outputs: [
+      { internalType: "bytes32[]", name: "packetIds", type: "bytes32[]" },
+      { internalType: "uint256", name: "total", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
+    name: "getUserClaimedPacketsCount",
+    outputs: [{ internalType: "uint256", name: "total", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "user", type: "address" },
+      { internalType: "uint256", name: "offset", type: "uint256" },
+      { internalType: "uint256", name: "limit", type: "uint256" },
+    ],
+    name: "getUserCreatedPackets",
+    outputs: [
+      { internalType: "bytes32[]", name: "packetIds", type: "bytes32[]" },
+      { internalType: "uint256", name: "total", type: "uint256" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "user", type: "address" }],
+    name: "getUserCreatedPacketsCount",
+    outputs: [{ internalType: "uint256", name: "total", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "initialOwner", type: "address" },
+    ],
+    name: "initialize",
+    outputs: [],
+    stateMutability: "nonpayable",
     type: "function",
   },
   {
@@ -320,6 +509,7 @@ export const REDPACKET_ABI = [
     inputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
     name: "packets",
     outputs: [
+      { internalType: "bytes32", name: "packetId", type: "bytes32" },
       { internalType: "address", name: "creator", type: "address" },
       { internalType: "uint256", name: "totalAmount", type: "uint256" },
       { internalType: "uint256", name: "remainingAmount", type: "uint256" },
@@ -330,7 +520,7 @@ export const REDPACKET_ABI = [
       { internalType: "string", name: "coverURI", type: "string" },
       { internalType: "address", name: "token", type: "address" },
       {
-        internalType: "enum RedPacket.PacketType",
+        internalType: "enum RedPacketImpl.PacketType",
         name: "packetType",
         type: "uint8",
       },
@@ -339,9 +529,19 @@ export const REDPACKET_ABI = [
     type: "function",
   },
   {
+    inputs: [],
+    name: "proxiableUUID",
+    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
     inputs: [{ internalType: "bytes32", name: "packetId", type: "bytes32" }],
     name: "refund",
-    outputs: [],
+    outputs: [
+      { internalType: "bytes32", name: "id", type: "bytes32" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -358,7 +558,10 @@ export const REDPACKET_ABI = [
       { internalType: "uint256", name: "_maxPercentage", type: "uint256" },
     ],
     name: "setPacketRange",
-    outputs: [],
+    outputs: [
+      { internalType: "uint256", name: "newMinPercentage", type: "uint256" },
+      { internalType: "uint256", name: "newMaxPercentage", type: "uint256" },
+    ],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -367,6 +570,36 @@ export const REDPACKET_ABI = [
     name: "transferOwnership",
     outputs: [],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "newImplementation", type: "address" },
+      { internalType: "bytes", name: "data", type: "bytes" },
+    ],
+    name: "upgradeToAndCall",
+    outputs: [],
+    stateMutability: "payable",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "", type: "address" },
+      { internalType: "uint256", name: "", type: "uint256" },
+    ],
+    name: "userClaimedPackets",
+    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "", type: "address" },
+      { internalType: "uint256", name: "", type: "uint256" },
+    ],
+    name: "userCreatedPackets",
+    outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+    stateMutability: "view",
     type: "function",
   },
 ] as const;
