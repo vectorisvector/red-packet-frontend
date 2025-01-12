@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { formatEther, Hex } from "viem";
+import { formatUnits, Hex } from "viem";
 import { useState } from "react";
 
 interface EventModalProps {
@@ -24,6 +24,9 @@ interface EventModalProps {
   activeTab: string;
   getImageUrl: (uri: string) => string;
   onClose?: (packetId: string) => void;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  nftSymbol: string;
 }
 
 export const EventModal = ({
@@ -35,8 +38,13 @@ export const EventModal = ({
   activeTab,
   getImageUrl,
   onClose,
+  tokenSymbol,
+  tokenDecimals,
+  nftSymbol,
 }: EventModalProps) => {
   const [copyStatus, setCopyStatus] = useState<string>("");
+
+  if (!showEventModal) return null;
 
   const handleCopy = async (text: string, field: string) => {
     try {
@@ -55,7 +63,17 @@ export const EventModal = ({
     setShowEventModal(false);
   };
 
-  if (!showEventModal) return null;
+  const createTotalAmountView = `${
+    activeTab === "ERC721"
+      ? createEvent?.totalAmount
+      : formatUnits(createEvent?.totalAmount ?? 0n, tokenDecimals)
+  } ${activeTab === "ERC721" ? nftSymbol : tokenSymbol}`;
+
+  const claimAmountView = `${
+    activeTab === "ERC721"
+      ? claimEvent?.amount
+      : formatUnits(claimEvent?.amount ?? 0n, tokenDecimals)
+  } ${activeTab === "ERC721" ? nftSymbol : tokenSymbol}`;
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50">
@@ -147,9 +165,7 @@ export const EventModal = ({
                 </div>
                 <div className="space-y-1">
                   <p className="text-gray-400">Total Amount</p>
-                  <p>
-                    {formatEther(createEvent.totalAmount)} {activeTab}
-                  </p>
+                  <p>{createTotalAmountView}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-gray-400">Count</p>
@@ -207,9 +223,7 @@ export const EventModal = ({
                 </div>
                 <div className="space-y-1">
                   <p className="text-gray-400">Amount</p>
-                  <p>
-                    {formatEther(claimEvent.amount)} {activeTab}
-                  </p>
+                  <p>{claimAmountView}</p>
                 </div>
                 {activeTab === "ERC721" && (
                   <div className="space-y-1">

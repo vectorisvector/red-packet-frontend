@@ -2,15 +2,16 @@
 
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useEffect, useState } from "react";
-import { decodeEventLog, formatUnits, Hex, parseEther, parseUnits } from "viem";
-import { REDPACKET_ADDRESS, REDPACKET_ABI } from "./config/contracts";
 import {
-  useWriteContract,
-  useWaitForTransactionReceipt,
-  useAccount,
-  useReadContract,
-  useSimulateContract,
-} from "wagmi";
+  decodeEventLog,
+  formatUnits,
+  Hex,
+  maxUint256,
+  parseEther,
+  parseUnits,
+} from "viem";
+import { REDPACKET_ADDRESS, REDPACKET_ABI } from "./config/contracts";
+import { useAccount, useReadContract, useSimulateContract } from "wagmi";
 import Image from "next/image";
 import { EventModal } from "./components/EventModal";
 import { erc20Abi, erc721Abi } from "viem";
@@ -59,34 +60,10 @@ export default function Home() {
     amount: bigint;
     tokenId: bigint;
   } | null>(null);
-  const [tokenDecimals, setTokenDecimals] = useState<number>(18);
   const [expireTime, setExpireTime] = useState("86400"); // 默认 1 天 (86400 秒)
   const [isApproving, setIsApproving] = useState(false);
-
-  const { writeContract: writeCreateContract, data: hash } = useWriteContract();
-  const { writeContract: writeClaimContract, data: claimHash } =
-    useWriteContract();
-
-  const {
-    isLoading: isCreating,
-    isSuccess: isCreateSuccess,
-    data: createReceipt,
-  } = useWaitForTransactionReceipt({
-    hash,
-    query: {
-      enabled: !!hash,
-    },
-  });
-  const {
-    isLoading: isClaiming,
-    isSuccess: isClaimSuccess,
-    data: claimReceipt,
-  } = useWaitForTransactionReceipt({
-    hash: claimHash,
-    query: {
-      enabled: !!claimHash,
-    },
-  });
+  const [isCreating, setIsCreating] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
   // 查询红包信息
   const { data: packetInfo } = useReadContract({
@@ -99,8 +76,19 @@ export default function Home() {
     },
   });
 
+  // 获取 ERC20 代币 symbol
+  const { data: erc20Symbol } = useReadContract({
+    address: tokenAddress as `0x${string}`,
+    abi: erc20Abi,
+    functionName: "symbol",
+    query: {
+      enabled: activeTab === "ERC20" && tokenAddress.length === 42,
+    },
+  });
+  const tokenSymbol = erc20Symbol ?? "ERC20";
+
   // 获取 ERC20 代币精度
-  const { data: decimals } = useReadContract({
+  const { data: erc20Decimals } = useReadContract({
     address: tokenAddress as `0x${string}`,
     abi: erc20Abi,
     functionName: "decimals",
@@ -108,6 +96,18 @@ export default function Home() {
       enabled: activeTab === "ERC20" && tokenAddress.length === 42,
     },
   });
+  const tokenDecimals = erc20Decimals ?? 18;
+
+  // 获取 ERC721 代币 symbol
+  const { data: erc721Symbol } = useReadContract({
+    address: tokenAddress as `0x${string}`,
+    abi: erc721Abi,
+    functionName: "symbol",
+    query: {
+      enabled: activeTab === "ERC721" && tokenAddress.length === 42,
+    },
+  });
+  const nftSymbol = erc721Symbol ?? "ERC721";
 
   // 预估用户领取红包是否成功
   const { data: userClaimedPacketData } = useSimulateContract({
@@ -120,13 +120,6 @@ export default function Home() {
     },
   });
   const userCanClaim = !!userClaimedPacketData?.result?.[0];
-
-  // 当获取到精度时更新状态
-  useEffect(() => {
-    if (decimals !== undefined) {
-      setTokenDecimals(Number(decimals));
-    }
-  }, [decimals]);
 
   // 检查 ERC20 授权
   const { data: erc20Allowance } = useReadContract({
@@ -156,9 +149,11 @@ export default function Home() {
     const expireTimeBigInt =
       BigInt(Math.floor(Date.now() / 1000)) + BigInt(parseInt(expireTime));
 
+    setIsCreating(true);
     try {
+      let hash: Hex;
       if (activeTab === "MON") {
-        await writeCreateContract({
+        hash = await writeContract(config, {
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createETHPacket",
@@ -169,14 +164,14 @@ export default function Home() {
         const amountBigInt = parseUnits(amount, tokenDecimals);
 
         // 检查授权
-        if (erc20Allowance && erc20Allowance < amountBigInt) {
+        if ((erc20Allowance ?? 0n) < amountBigInt) {
           setIsApproving(true);
           try {
             const hash = await writeContract(config, {
               address: tokenAddress as `0x${string}`,
               abi: erc20Abi,
               functionName: "approve",
-              args: [REDPACKET_ADDRESS, amountBigInt],
+              args: [REDPACKET_ADDRESS, maxUint256],
             });
             // 等待授权确认
             await waitForTransactionReceipt(config, { hash });
@@ -185,7 +180,7 @@ export default function Home() {
           }
         }
 
-        await writeCreateContract({
+        hash = await writeContract(config, {
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createERC20Packet",
@@ -218,7 +213,7 @@ export default function Home() {
           }
         }
 
-        await writeCreateContract({
+        hash = await writeContract(config, {
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createERC721Packet",
@@ -231,18 +226,17 @@ export default function Home() {
           ],
         });
       }
-    } catch (error) {
-      console.error("Create packet error:", error);
-    }
-  };
 
-  // 监听交易完成
-  useEffect(() => {
-    if (isCreateSuccess && createReceipt) {
-      setShowEventModal(true);
-      setEventType("create");
+      // 等待交易确认
+      const receipt = await waitForTransactionReceipt(config, {
+        hash,
+      });
+
       // 解析日志
-      for (const log of createReceipt.logs) {
+      // 只处理来自 RedPacket 合约的日志
+      for (const log of receipt.logs.filter(
+        (log) => log.address.toLowerCase() === REDPACKET_ADDRESS.toLowerCase()
+      )) {
         const decodedLog = decodeEventLog({
           abi: REDPACKET_ABI,
           data: log.data,
@@ -250,6 +244,7 @@ export default function Home() {
         });
 
         // 根据日志类型设置事件
+        // 创建红包
         if (decodedLog.eventName === "PacketCreated") {
           setCreateEvent({
             packetId: decodedLog.args.packetId,
@@ -264,20 +259,44 @@ export default function Home() {
           });
           setEventType("create");
           setShowEventModal(true);
+          return;
         }
       }
+    } catch (error) {
+      console.error("Create packet error:", error);
+    } finally {
+      setIsCreating(false);
     }
+  };
 
-    if (isClaimSuccess) {
-      setShowEventModal(true);
-      setEventType("claim");
-      // 解析日志
-      for (const log of claimReceipt.logs) {
+  // 领取红包
+  const handleClaim = async () => {
+    setIsClaiming(true);
+    try {
+      const hash = await writeContract(config, {
+        address: REDPACKET_ADDRESS,
+        abi: REDPACKET_ABI,
+        functionName: "claimPacket",
+        args: [packetId as `0x${string}`],
+      });
+
+      // 等待交易确认
+      const receipt = await waitForTransactionReceipt(config, {
+        hash,
+      });
+
+      // 只处理来自 RedPacket 合约的日志
+      for (const log of receipt.logs.filter(
+        (log) => log.address.toLowerCase() === REDPACKET_ADDRESS.toLowerCase()
+      )) {
         const decodedLog = decodeEventLog({
           abi: REDPACKET_ABI,
           data: log.data,
           topics: log.topics,
         });
+
+        // 根据日志类型设置事件
+        // 领取红包
         if (decodedLog.eventName === "PacketClaimed") {
           setClaimEvent({
             packetId: decodedLog.args.packetId,
@@ -285,22 +304,15 @@ export default function Home() {
             amount: decodedLog.args.amount,
             tokenId: decodedLog.args.tokenId,
           });
+          setEventType("claim");
+          setShowEventModal(true);
+          return;
         }
       }
-    }
-  }, [isCreateSuccess, isClaimSuccess, createReceipt, claimReceipt]);
-
-  // 领取红包
-  const handleClaim = async () => {
-    try {
-      await writeClaimContract({
-        address: REDPACKET_ADDRESS,
-        abi: REDPACKET_ABI,
-        functionName: "claimPacket",
-        args: [packetId as `0x${string}`],
-      });
     } catch (error) {
       console.error("Claim packet error:", error);
+    } finally {
+      setIsClaiming(false);
     }
   };
 
@@ -331,6 +343,12 @@ export default function Home() {
   const handlePacketClick = (packetId: string) => {
     setPacketId(packetId);
   };
+
+  useEffect(() => {
+    if (packetInfo) {
+      setTokenAddress(packetInfo.token);
+    }
+  }, [packetInfo]);
 
   // 如果组件未挂载，返回null或加载占位符
   if (!mounted) {
@@ -492,6 +510,22 @@ export default function Home() {
                       </>
                     )}
 
+                    {/* Token IDs */}
+                    {activeTab === "ERC721" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Token IDs (comma separated)
+                        </label>
+                        <input
+                          type="text"
+                          value={tokenIds}
+                          onChange={(e) => setTokenIds(e.target.value)}
+                          className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="1, 2, 3"
+                        />
+                      </div>
+                    )}
+
                     {/* Expire Time */}
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -509,22 +543,6 @@ export default function Home() {
                         <option value="172800">2 Days</option>
                       </select>
                     </div>
-
-                    {/* Token IDs */}
-                    {activeTab === "ERC721" && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                          Token IDs (comma separated)
-                        </label>
-                        <input
-                          type="text"
-                          value={tokenIds}
-                          onChange={(e) => setTokenIds(e.target.value)}
-                          className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          placeholder="1, 2, 3"
-                        />
-                      </div>
-                    )}
 
                     {activeTab !== "ERC721" && (
                       <>
@@ -598,12 +616,6 @@ export default function Home() {
                         "Create Packet"
                       )}
                     </button>
-
-                    {isCreateSuccess && (
-                      <div className="bg-green-500/20 text-green-400 px-4 py-2 rounded-lg">
-                        ✨ Created Successfully!
-                      </div>
-                    )}
 
                     {/* Cover Preview */}
                     <div className="relative w-full aspect-[3/4] rounded-lg overflow-hidden bg-gray-800">
@@ -723,8 +735,8 @@ export default function Home() {
                               {packetInfo.packetType === 0
                                 ? "MON"
                                 : packetInfo.packetType === 1
-                                ? "ERC20"
-                                : "ERC721"}
+                                ? tokenSymbol
+                                : nftSymbol}
                             </p>
                           </div>
                           {packetInfo.packetType !== 0 && (
@@ -816,6 +828,9 @@ export default function Home() {
             activeTab={activeTab}
             getImageUrl={getImageUrl}
             onClose={handlePacketClick}
+            tokenSymbol={tokenSymbol}
+            tokenDecimals={tokenDecimals}
+            nftSymbol={nftSymbol}
           />
         </div>
       </div>
