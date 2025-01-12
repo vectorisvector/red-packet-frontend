@@ -641,10 +641,14 @@ export default function Home() {
                       <div className="relative block text-sm font-medium text-gray-300 mb-2">
                         <div className="flex items-center gap-2">
                           <div>Packet ID</div>
-                          {userCanClaim ? (
-                            <span className="text-green-500 text-lg">✓</span>
-                          ) : (
-                            <span className="text-red-500 text-lg">✗</span>
+                          {packetId && (
+                            <span
+                              className={`text-sm ${
+                                userCanClaim ? "text-green-500" : "text-red-500"
+                              }`}
+                            >
+                              {userCanClaim ? "✓" : "✗"}
+                            </span>
                           )}
                         </div>
                       </div>
