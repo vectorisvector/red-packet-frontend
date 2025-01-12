@@ -175,9 +175,10 @@ export const UserPackets = ({
                 <div
                   key={index}
                   onClick={() => onPacketClick(packet.packetId.toString())}
-                  className="bg-gray-700/30 rounded-lg p-4 flex items-center space-x-4 cursor-pointer hover:bg-gray-700/50 transition-colors duration-200"
+                  className="bg-gray-700/30 rounded-lg p-4 grid grid-cols-[auto,1fr] gap-4 cursor-pointer hover:bg-gray-700/50 transition-colors duration-200"
                 >
-                  <div className="relative w-16 aspect-[3/4] rounded-lg overflow-hidden flex-shrink-0">
+                  {/* 左侧图片 */}
+                  <div className="relative w-24 aspect-[3/4] rounded-lg overflow-hidden">
                     <Image
                       src={getImageUrl(packet.coverURI)}
                       alt="Packet Cover"
@@ -185,33 +186,64 @@ export const UserPackets = ({
                       className="object-cover"
                     />
                   </div>
-                  <div className="flex-grow">
+
+                  {/* 右侧信息 */}
+                  <div className="space-y-2">
+                    {/* Status Badge */}
+                    <div>
+                      {isExpired(packet.expireTime) ? (
+                        <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
+                          Expired
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Packet Info */}
                     <div className="font-mono text-sm text-gray-400">
                       ID: {packet.packetId.slice(0, 6)}...
                       {packet.packetId.slice(-4)}
                     </div>
-                    <div className="text-sm mt-1">
+
+                    <div className="text-sm text-green-400">
                       {formatEther(packet.totalAmount)}{" "}
                       {packet.packetType === 0
                         ? "MON"
                         : packet.packetType === 1
-                        ? "ERC20"
-                        : "ERC721"}
+                        ? "TOKEN"
+                        : "NFT"}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Claimed: {Number(packet.remaining)}/{Number(packet.count)}
+
+                    <div className="text-xs text-gray-500">
+                      <span className="text-gray-400">Claimed:</span>
+                      <span
+                        className={`${
+                          Number(packet.remaining) === 0
+                            ? "text-red-400"
+                            : "text-green-400"
+                        }`}
+                      >
+                        {Number(packet.remaining)}/{Number(packet.count)}
+                      </span>
                     </div>
-                  </div>
-                  <div className="flex-shrink-0">
-                    {isExpired(packet.expireTime) ? (
-                      <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
-                        Expired
+
+                    <div className="text-xs text-gray-500 flex flex-col items-start">
+                      <span className="text-gray-400">Expire Time:</span>
+                      <span
+                        className={`${
+                          isExpired(packet.expireTime)
+                            ? "text-red-400"
+                            : "text-green-400"
+                        }`}
+                      >
+                        {new Date(
+                          Number(packet.expireTime) * 1000
+                        ).toLocaleString()}
                       </span>
-                    ) : (
-                      <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-                        Active
-                      </span>
-                    )}
+                    </div>
                   </div>
                 </div>
               ))}
