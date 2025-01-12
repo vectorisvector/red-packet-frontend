@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { useAccount, useReadContract } from "wagmi";
+import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { REDPACKET_ADDRESS, REDPACKET_ABI } from "../config/contracts";
 import Image from "next/image";
-import { formatEther, Hex } from "viem";
+import { erc20Abi, erc721Abi, formatEther, formatUnits, Hex } from "viem";
+import { writeContract } from "wagmi/actions";
+import { config } from "../config/wagmi";
 
 type TabType = "created" | "claimed";
 
@@ -131,6 +133,85 @@ export const UserPackets = ({
     return expireTime < BigInt(Math.floor(Date.now() / 1000));
   };
 
+  // 处理退款
+  const handleRefund = async (packetId: string) => {
+    try {
+      await writeContract(config, {
+        address: REDPACKET_ADDRESS,
+        abi: REDPACKET_ABI,
+        functionName: "refund",
+        args: [packetId as Hex],
+      });
+    } catch (error) {
+      console.error("Refund packet error:", error);
+    }
+  };
+
+  const erc20Packets = packetDetails.filter(
+    (packet) => packet.packetType === 1
+  );
+
+  // 获取所有 erc20 红包的 symbol
+  const { data: erc20Symbols } = useReadContracts({
+    contracts: erc20Packets.map((packet) => ({
+      address: packet.token,
+      abi: erc20Abi,
+      functionName: "symbol",
+    })),
+  });
+
+  // 获取所有 erc20 红包的 decimals
+  const { data: erc20Decimals } = useReadContracts({
+    contracts: erc20Packets.map((packet) => ({
+      address: packet.token,
+      abi: erc20Abi,
+      functionName: "decimals",
+    })),
+  });
+
+  const erc20Map = new Map(
+    erc20Packets.map((packet, index) => [
+      packet.packetId,
+      {
+        symbol: erc20Symbols?.[index]?.result?.toString() || "TOKEN",
+        decimals: Number(erc20Decimals?.[index]?.result?.valueOf()) || 18,
+      },
+    ])
+  );
+
+  const erc721Packets = packetDetails.filter(
+    (packet) => packet.packetType === 2
+  );
+
+  // 获取所有 erc721 红包的 symbol
+  const { data: erc721Symbols } = useReadContracts({
+    contracts: erc721Packets.map((packet) => ({
+      address: packet.token,
+      abi: erc721Abi,
+      functionName: "symbol",
+    })),
+  });
+
+  const erc721Map = new Map(
+    erc721Packets.map((packet, index) => [
+      packet.packetId,
+      {
+        symbol: erc721Symbols?.[index]?.result?.toString() || "NFT",
+      },
+    ])
+  );
+
+  const getPacketTotalAmountView = (packet: PacketInfo) => {
+    return packet.packetType === 0
+      ? `${formatEther(packet.totalAmount)} MON`
+      : packet.packetType === 1
+      ? `${formatUnits(
+          packet.totalAmount,
+          erc20Map.get(packet.packetId)?.decimals || 18
+        )} ${erc20Map.get(packet.packetId)?.symbol}`
+      : `${packet.totalAmount} ${erc721Map.get(packet.packetId)?.symbol}`;
+  };
+
   return (
     <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 shadow-xl">
       {/* Tabs */}
@@ -175,76 +256,87 @@ export const UserPackets = ({
                 <div
                   key={index}
                   onClick={() => onPacketClick(packet.packetId.toString())}
-                  className="bg-gray-700/30 rounded-lg p-4 grid grid-cols-[auto,1fr] gap-4 cursor-pointer hover:bg-gray-700/50 transition-colors duration-200"
+                  className="bg-gray-700/30 rounded-lg p-4 flex flex-col gap-4 cursor-pointer hover:bg-gray-700/50 transition-colors duration-200"
                 >
-                  {/* 左侧图片 */}
-                  <div className="relative w-24 aspect-[3/4] rounded-lg overflow-hidden">
-                    <Image
-                      src={getImageUrl(packet.coverURI)}
-                      alt="Packet Cover"
-                      fill
-                      className="object-cover"
-                    />
+                  <div className="flex items-center gap-3">
+                    {/* 左侧图片 */}
+                    <div className="relative w-24 aspect-[3/4] rounded-lg overflow-hidden">
+                      <Image
+                        src={getImageUrl(packet.coverURI)}
+                        alt="Packet Cover"
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+
+                    {/* 右侧信息 */}
+                    <div className="space-y-2">
+                      {/* Status Badge */}
+                      <div>
+                        {isExpired(packet.expireTime) ? (
+                          <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
+                            Expired
+                          </span>
+                        ) : (
+                          <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+                            Active
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Packet Info */}
+                      <div className="font-mono text-sm text-gray-400">
+                        ID: {packet.packetId.slice(0, 6)}...
+                        {packet.packetId.slice(-4)}
+                      </div>
+
+                      <div className="text-sm text-green-400">
+                        {getPacketTotalAmountView(packet)}
+                      </div>
+
+                      <div className="text-xs text-gray-500 flex gap-1">
+                        <span className="text-gray-400">Claimed:</span>
+                        <span
+                          className={`${
+                            Number(packet.remaining) === 0
+                              ? "text-red-400"
+                              : "text-green-400"
+                          }`}
+                        >
+                          {Number(packet.remaining)}/{Number(packet.count)}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-gray-500 flex flex-col items-start">
+                        <span className="text-gray-400">Expire Time:</span>
+                        <span
+                          className={`${
+                            isExpired(packet.expireTime)
+                              ? "text-red-400"
+                              : "text-green-400"
+                          }`}
+                        >
+                          {new Date(
+                            Number(packet.expireTime) * 1000
+                          ).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* 右侧信息 */}
-                  <div className="space-y-2">
-                    {/* Status Badge */}
-                    <div>
-                      {isExpired(packet.expireTime) ? (
-                        <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
-                          Expired
-                        </span>
-                      ) : (
-                        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-                          Active
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Packet Info */}
-                    <div className="font-mono text-sm text-gray-400">
-                      ID: {packet.packetId.slice(0, 6)}...
-                      {packet.packetId.slice(-4)}
-                    </div>
-
-                    <div className="text-sm text-green-400">
-                      {formatEther(packet.totalAmount)}{" "}
-                      {packet.packetType === 0
-                        ? "MON"
-                        : packet.packetType === 1
-                        ? "TOKEN"
-                        : "NFT"}
-                    </div>
-
-                    <div className="text-xs text-gray-500">
-                      <span className="text-gray-400">Claimed:</span>
-                      <span
-                        className={`${
-                          Number(packet.remaining) === 0
-                            ? "text-red-400"
-                            : "text-green-400"
-                        }`}
+                  {isExpired(packet.expireTime) &&
+                    packet.creator === address &&
+                    packet.remainingAmount > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRefund(packet.packetId);
+                        }}
+                        className="w-full text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/30"
                       >
-                        {Number(packet.remaining)}/{Number(packet.count)}
-                      </span>
-                    </div>
-
-                    <div className="text-xs text-gray-500 flex flex-col items-start">
-                      <span className="text-gray-400">Expire Time:</span>
-                      <span
-                        className={`${
-                          isExpired(packet.expireTime)
-                            ? "text-red-400"
-                            : "text-green-400"
-                        }`}
-                      >
-                        {new Date(
-                          Number(packet.expireTime) * 1000
-                        ).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
+                        Refund
+                      </button>
+                    )}
                 </div>
               ))}
             </div>
