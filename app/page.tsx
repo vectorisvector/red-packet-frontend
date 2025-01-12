@@ -9,12 +9,15 @@ import {
   useWaitForTransactionReceipt,
   useAccount,
   useReadContract,
+  useSimulateContract,
 } from "wagmi";
 import Image from "next/image";
 import { EventModal } from "./components/EventModal";
-import { erc20Abi } from "viem";
+import { erc20Abi, erc721Abi } from "viem";
 import { Stats } from "./components/Stats";
 import { UserPackets } from "./components/UserPackets";
+import { waitForTransactionReceipt, writeContract } from "wagmi/actions";
+import { config } from "./config/wagmi";
 
 type TabType = "MON" | "ERC20" | "ERC721";
 
@@ -57,8 +60,10 @@ export default function Home() {
     tokenId: bigint;
   } | null>(null);
   const [tokenDecimals, setTokenDecimals] = useState<number>(18);
+  const [expireTime, setExpireTime] = useState("86400"); // 默认 1 天 (86400 秒)
+  const [isApproving, setIsApproving] = useState(false);
 
-  const { writeContract, data: hash } = useWriteContract({});
+  const { writeContract: writeCreateContract, data: hash } = useWriteContract();
   const { writeContract: writeClaimContract, data: claimHash } =
     useWriteContract();
 
@@ -104,6 +109,18 @@ export default function Home() {
     },
   });
 
+  // 预估用户领取红包是否成功
+  const { data: userClaimedPacketData } = useSimulateContract({
+    address: REDPACKET_ADDRESS,
+    abi: REDPACKET_ABI,
+    functionName: "claimPacket",
+    args: [packetId as `0x${string}`],
+    query: {
+      enabled: !!packetId && packetId.length === 66,
+    },
+  });
+  const userCanClaim = !!userClaimedPacketData?.result?.[0];
+
   // 当获取到精度时更新状态
   useEffect(() => {
     if (decimals !== undefined) {
@@ -111,42 +128,103 @@ export default function Home() {
     }
   }, [decimals]);
 
+  // 检查 ERC20 授权
+  const { data: erc20Allowance } = useReadContract({
+    address: tokenAddress as `0x${string}`,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [address as `0x${string}`, REDPACKET_ADDRESS],
+    query: {
+      enabled: !!address && !!tokenAddress && activeTab === "ERC20",
+    },
+  });
+
+  // 检查 ERC721 授权
+  const { data: isERC721Approved } = useReadContract({
+    address: tokenAddress as `0x${string}`,
+    abi: erc721Abi,
+    functionName: "isApprovedForAll",
+    args: [address as `0x${string}`, REDPACKET_ADDRESS],
+    query: {
+      enabled: !!address && !!tokenAddress && activeTab === "ERC721",
+    },
+  });
+
   // 创建红包
   const handleCreate = async () => {
-    const expireTime = Math.floor(Date.now() / 1000) + 3600; // 1小时后过期
+    // 将过期时间转换为 BigInt
+    const expireTimeBigInt =
+      BigInt(Math.floor(Date.now() / 1000)) + BigInt(parseInt(expireTime));
 
     try {
       if (activeTab === "MON") {
-        await writeContract({
+        await writeCreateContract({
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createETHPacket",
-          args: [BigInt(count), BigInt(expireTime), isRandom, coverURI],
+          args: [BigInt(count), expireTimeBigInt, isRandom, coverURI],
           value: parseEther(amount),
         });
       } else if (activeTab === "ERC20") {
-        await writeContract({
+        const amountBigInt = parseUnits(amount, tokenDecimals);
+
+        // 检查授权
+        if (erc20Allowance && erc20Allowance < amountBigInt) {
+          setIsApproving(true);
+          try {
+            const hash = await writeContract(config, {
+              address: tokenAddress as `0x${string}`,
+              abi: erc20Abi,
+              functionName: "approve",
+              args: [REDPACKET_ADDRESS, amountBigInt],
+            });
+            // 等待授权确认
+            await waitForTransactionReceipt(config, { hash });
+          } finally {
+            setIsApproving(false);
+          }
+        }
+
+        await writeCreateContract({
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createERC20Packet",
           args: [
             BigInt(count),
-            BigInt(expireTime),
+            expireTimeBigInt,
             isRandom,
             coverURI,
             tokenAddress as `0x${string}`,
-            parseUnits(amount, tokenDecimals),
+            amountBigInt,
           ],
         });
       } else {
         const tokenIdArray = tokenIds.split(",").map((id) => BigInt(id.trim()));
-        await writeContract({
+
+        // 检查授权
+        if (!isERC721Approved) {
+          setIsApproving(true);
+          try {
+            const hash = await writeContract(config, {
+              address: tokenAddress as `0x${string}`,
+              abi: erc721Abi,
+              functionName: "setApprovalForAll",
+              args: [REDPACKET_ADDRESS, true],
+            });
+            // 等待授权确认
+            await waitForTransactionReceipt(config, { hash });
+          } finally {
+            setIsApproving(false);
+          }
+        }
+
+        await writeCreateContract({
           address: REDPACKET_ADDRESS,
           abi: REDPACKET_ABI,
           functionName: "createERC721Packet",
           args: [
             BigInt(count),
-            BigInt(expireTime),
+            expireTimeBigInt,
             coverURI,
             tokenAddress as `0x${string}`,
             tokenIdArray,
@@ -249,6 +327,7 @@ export default function Home() {
     return uri;
   };
 
+  // 点击红包
   const handlePacketClick = (packetId: string) => {
     setPacketId(packetId);
   };
@@ -308,6 +387,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto p-6 flex gap-6">
         {/* Left Column */}
         <div className="w-[350px] space-y-6">
@@ -315,6 +395,7 @@ export default function Home() {
           <UserPackets onPacketClick={handlePacketClick} />
         </div>
 
+        {/* Right Column */}
         <div className="flex-1">
           {/* Stats Section */}
           <Stats />
@@ -327,6 +408,7 @@ export default function Home() {
             <ConnectButton />
           </div>
 
+          {/* Create Red Packet */}
           {address ? (
             <div className="grid grid-cols-2 gap-8">
               {/* Left Column - Create Red Packet */}
@@ -338,13 +420,16 @@ export default function Home() {
                     </span>
                     Create Red Packet
                   </h2>
+
                   {/* Create Form */}
                   <div className="space-y-4">
+                    {/* Tab Buttons */}
                     <div className="flex space-x-2 mb-4">
                       <TabButton tab="MON" />
                       <TabButton tab="ERC20" />
                       <TabButton tab="ERC721" />
                     </div>
+                    {/* Cover URI */}
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">
                         Cover URI
@@ -359,6 +444,8 @@ export default function Home() {
                         />
                       </div>
                     </div>
+
+                    {/* Token Address */}
                     {(activeTab === "ERC20" || activeTab === "ERC721") && (
                       <div>
                         <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -376,6 +463,7 @@ export default function Home() {
 
                     {activeTab !== "ERC721" && (
                       <>
+                        {/* Number of Packets */}
                         <div>
                           <label className="block text-sm font-medium text-gray-300 mb-2">
                             Number of Packets
@@ -388,6 +476,7 @@ export default function Home() {
                           />
                         </div>
 
+                        {/* Total Amount */}
                         <div>
                           <label className="block text-sm font-medium text-gray-300 mb-2">
                             Total Amount{" "}
@@ -400,19 +489,28 @@ export default function Home() {
                             className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           />
                         </div>
-
-                        <label className="flex items-center space-x-3 text-gray-300 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={isRandom}
-                            onChange={(e) => setIsRandom(e.target.checked)}
-                            className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
-                          />
-                          <span>Random Amount Distribution</span>
-                        </label>
                       </>
                     )}
 
+                    {/* Expire Time */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Expire Time
+                      </label>
+                      <select
+                        value={expireTime}
+                        onChange={(e) => setExpireTime(e.target.value)}
+                        className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="3600">1 Hour</option>
+                        <option value="7200">2 Hours</option>
+                        <option value="14400">4 Hours</option>
+                        <option value="86400">1 Day</option>
+                        <option value="172800">2 Days</option>
+                      </select>
+                    </div>
+
+                    {/* Token IDs */}
                     {activeTab === "ERC721" && (
                       <div>
                         <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -428,12 +526,51 @@ export default function Home() {
                       </div>
                     )}
 
+                    {activeTab !== "ERC721" && (
+                      <>
+                        {/* Random Amount Distribution */}
+                        <label className="flex items-center space-x-3 text-gray-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isRandom}
+                            onChange={(e) => setIsRandom(e.target.checked)}
+                            className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
+                          />
+                          <span>Random Amount Distribution</span>
+                        </label>
+                      </>
+                    )}
+
                     <button
                       onClick={handleCreate}
-                      disabled={isCreating}
+                      disabled={isCreating || isApproving}
                       className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-indigo-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isCreating ? (
+                      {isApproving ? (
+                        <span className="flex items-center justify-center">
+                          <svg
+                            className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                          >
+                            <circle
+                              className="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              strokeWidth="4"
+                            ></circle>
+                            <path
+                              className="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
+                          </svg>
+                          Approving...
+                        </span>
+                      ) : isCreating ? (
                         <span className="flex items-center justify-center">
                           <svg
                             className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
@@ -497,12 +634,20 @@ export default function Home() {
                     <span className="bg-pink-500 p-2 rounded-lg mr-3">🔍</span>
                     Query & Claim Packet
                   </h2>
+
                   {/* Query and Claim Form */}
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Packet ID
-                      </label>
+                      <div className="relative block text-sm font-medium text-gray-300 mb-2">
+                        <div className="flex items-center gap-2">
+                          <div>Packet ID</div>
+                          {userCanClaim ? (
+                            <span className="text-green-500 text-lg">✓</span>
+                          ) : (
+                            <span className="text-red-500 text-lg">✗</span>
+                          )}
+                        </div>
+                      </div>
                       <input
                         type="text"
                         value={packetId}
@@ -608,13 +753,30 @@ export default function Home() {
                             </p>
                           </div>
                         </div>
-                        <button
-                          onClick={handleClaim}
-                          disabled={isClaiming}
-                          className="w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-pink-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isClaiming ? "Claiming..." : "Claim Packet"}
-                        </button>
+
+                        <div>
+                          {!userCanClaim && (
+                            <div className="text-yellow-500 text-sm mb-2">
+                              {address
+                                ? "You cannot claim this red packet"
+                                : "Connect wallet to claim"}
+                            </div>
+                          )}
+                          <button
+                            onClick={handleClaim}
+                            disabled={isClaiming || !userCanClaim}
+                            className="w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg px-4 py-2 hover:from-pink-600 hover:to-purple-600 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isClaiming
+                              ? "Claiming..."
+                              : !address
+                              ? "Connect Wallet"
+                              : !userCanClaim
+                              ? "Cannot Claim"
+                              : "Claim Packet"}
+                          </button>
+                        </div>
+
                         <div className="relative w-full aspect-[3/4] rounded-lg overflow-hidden mb-4">
                           <Image
                             src={getImageUrl(packetInfo.coverURI)}
