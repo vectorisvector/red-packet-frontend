@@ -1,4 +1,4 @@
-export const REDPACKET_ADDRESS = "0x7255618eB917883FBB449D851965f824a5aD8875";
+export const REDPACKET_ADDRESS = "0x19E9fF0d106cA6C18DF2Dc268D268cE313D05723";
 
 export const REDPACKET_ABI = [
   { inputs: [], stateMutability: "nonpayable", type: "constructor" },
