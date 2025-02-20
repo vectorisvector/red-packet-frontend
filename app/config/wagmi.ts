@@ -11,7 +11,9 @@ const monadDevnet: Chain = {
   },
   rpcUrls: {
     default: {
-      http: ["https://testnet-rpc.monad.xyz"],
+      http: [
+        "https://monad-testnet.g.alchemy.com/v2/iFUmhYjv1-nEs20EuldxzyBuyVgA_g42",
+      ],
     },
   },
   blockExplorers: {
