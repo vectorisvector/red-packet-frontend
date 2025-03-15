@@ -12,7 +12,7 @@ const monadDevnet: Chain = {
   rpcUrls: {
     default: {
       http: [
-        "https://monad-testnet.g.alchemy.com/v2/iFUmhYjv1-nEs20EuldxzyBuyVgA_g42",
+        "https://divine-flashy-road.monad-testnet.quiknode.pro/6c7d555d0f9bb65e072423a46e67136067b69e25/",
       ],
     },
   },
